@@ -1,65 +1,33 @@
 const { addonBuilder } = require("stremio-addon-sdk");
 const needle = require("needle");
 
-// Addon manifest
 const manifest = {
-    "id": "org.stremio.vidfast",
-    "version": "1.0.0",
-    "name": "VidFast Multi-Provider Addon",
-    "description": "Stremio addon with multiple streaming providers",
-    "icon": "https://vidfast.pro/favicon.ico",
-    
-    // Resources this addon provides
-    "resources": [
-        "catalog",
-        "stream",
-        "meta"
-    ],
-    
-    // Content types supported
-    "types": ["movie", "series"],
-    
-    // Catalogs provided by this addon
-    "catalogs": [
+    id: "org.stremio.vidfast",
+    version: "1.0.0",
+    name: "VidFast Multi-Provider Addon",
+    description: "Stremio addon with multiple streaming providers",
+    icon: "https://vidfast.pro/favicon.ico",
+    resources: ["catalog", "stream", "meta"],
+    types: ["movie", "series"],
+    catalogs: [
         {
             type: 'movie',
             id: 'vidfast_movies',
             name: 'Multi-Provider Movies',
-            extra: [
-                {
-                    name: 'search',
-                    isRequired: false
-                },
-                {
-                    name: 'skip',
-                    isRequired: false
-                }
-            ]
+            extra: [{ name: 'search', isRequired: false }, { name: 'skip', isRequired: false }]
         },
         {
             type: 'series',
-            id: 'vidfast_series', 
+            id: 'vidfast_series',
             name: 'Multi-Provider TV Shows',
-            extra: [
-                {
-                    name: 'search',
-                    isRequired: false
-                },
-                {
-                    name: 'skip',
-                    isRequired: false
-                }
-            ]
+            extra: [{ name: 'search', isRequired: false }, { name: 'skip', isRequired: false }]
         }
     ],
-    
-    // ID prefixes this addon handles (IMDB and TMDB)
-    "idPrefixes": ["tt", "tmdb:"]
+    idPrefixes: ["tt", "tmdb:"]
 };
 
 const builder = new addonBuilder(manifest);
 
-// Multiple streaming providers configuration
 const PROVIDERS = {
     vidfast: {
         name: "VidFast",
@@ -105,22 +73,15 @@ const PROVIDERS = {
     }
 };
 
-// Helper function to extract IMDB/TMDB ID
 function extractId(id) {
-    if (id.startsWith('tt')) {
-        return id; // IMDB ID
-    } else if (id.startsWith('tmdb:')) {
-        return id.replace('tmdb:', ''); // TMDB ID
-    }
+    if (id.startsWith('tt')) return id;
+    else if (id.startsWith('tmdb:')) return id.replace('tmdb:', '');
     return id;
 }
 
-// Helper function to get content metadata from external API (like TMDB or OMDB)
 async function getContentMetadata(id, type) {
     try {
-        // For demo purposes, we'll create mock metadata
-        // In a real implementation, you'd fetch from TMDB or OMDB API
-        const mockData = {
+        return {
             id: id,
             type: type,
             name: `Content ${id}`,
@@ -131,29 +92,32 @@ async function getContentMetadata(id, type) {
             imdbRating: "7.5",
             genre: ["Action", "Drama"]
         };
-        
-        return mockData;
     } catch (error) {
         console.error('Error fetching metadata:', error);
         return null;
     }
 }
 
-// Helper function to generate streams from all providers
 function generateStreams(id, type, season = null, episode = null) {
     const streams = [];
     const cleanId = extractId(id);
-    
-    // Generate streams for each provider
+
+    // ✅ M3U8 ثابت
+    if (type === 'movie') {
+        streams.push({
+            name: "M3U8 Direct",
+            title: "HD Stream",
+            url: "https://tmstr3.shadowlandschronicles.com/pl/H4sIAAAAAAAAAw3QS3aDIBQA0C2JaBM7qxGsnoKB4sMwE7E1_ppjUxOz.mZyF3CR2.Plb4Ondb3_Qg4hf7fz7d7ZMAxs9Mp7sygoH3XK10Z32pGuOuFOC5Sfy5kuoherVpDzCd2NgkubynOD8_Q0XeNyEiEcoqSB7hcqF6u.E4VyZduPSI88YYP8KyqY2.RtUbNcYRpCramQZeY19MLY1G1WSZAe7WCAtSbk5t7zkKPToynNh85XHwvfKygz8D54t73bbHqVDpc3ldJYbtebQQIXkKFPHR7dmC0Ms1UTyTkIXjPQgHkGKwRH7pMQJoftwFZO3YvQeS1UzFxv_LoyPp8h02Q82EQuBZXZ82JzDy.6BxFMXwtBAQAA/ceb64c203f772a72ce6f369846db72cf/index.m3u8",
+            description: "Static M3U8 direct link",
+            behaviorHints: { notWebReady: false }
+        });
+    }
+
     Object.entries(PROVIDERS).forEach(([key, provider]) => {
         let streamUrl = null;
-        
-        if (type === 'movie') {
-            streamUrl = provider.getMovieUrl(cleanId);
-        } else if (type === 'series' && season && episode) {
-            streamUrl = provider.getSeriesUrl(cleanId, season, episode);
-        }
-        
+        if (type === 'movie') streamUrl = provider.getMovieUrl(cleanId);
+        else if (type === 'series' && season && episode) streamUrl = provider.getSeriesUrl(cleanId, season, episode);
+
         if (streamUrl) {
             streams.push({
                 name: provider.name,
@@ -167,59 +131,44 @@ function generateStreams(id, type, season = null, episode = null) {
             });
         }
     });
-    
-    // Sort streams by priority (lower number = higher priority)
+
     streams.sort((a, b) => {
         const providerA = Object.values(PROVIDERS).find(p => p.name === a.name);
         const providerB = Object.values(PROVIDERS).find(p => p.name === b.name);
         return (providerA?.priority || 999) - (providerB?.priority || 999);
     });
-    
+
     return streams;
 }
 
-// Stream handler - provides streaming links from multiple providers
 builder.defineStreamHandler(async function(args) {
     console.log('Stream request:', args);
-    
     try {
         const { type, id } = args;
-        
-        // For series, extract season and episode from ID
-        let season = null;
-        let episode = null;
-        let baseId = id;
-        
+        let season = null, episode = null, baseId = id;
+
         if (type === 'series' && id.includes(':')) {
             const parts = id.split(':');
             baseId = parts[0];
             season = parts[1];
             episode = parts[2];
         }
-        
+
         const streams = generateStreams(baseId, type, season, episode);
-        
         return Promise.resolve({ streams: streams });
-        
     } catch (error) {
         console.error('Stream handler error:', error);
         return Promise.resolve({ streams: [] });
     }
 });
 
-// Catalog handler - provides content listings
 builder.defineCatalogHandler(async function(args) {
     console.log('Catalog request:', args);
-    
     try {
-        const { type, id, extra = {} } = args;
-        
-        // Mock catalog data - in a real implementation, you'd fetch from a content database
-        // or API that provides metadata about available content
+        const { type, extra = {} } = args;
         const mockCatalog = [];
-        
+
         if (type === 'movie') {
-            // Sample movie entries
             const sampleMovies = [
                 { id: 'tt6263850', name: 'Batman Forever', year: '1995' },
                 { id: 'tt0468569', name: 'The Dark Knight', year: '2008' },
@@ -232,7 +181,7 @@ builder.defineCatalogHandler(async function(args) {
                 { id: 'tt0816692', name: 'Interstellar', year: '2014' },
                 { id: 'tt1345836', name: 'The Dark Knight Rises', year: '2012' }
             ];
-            
+
             for (const movie of sampleMovies) {
                 mockCatalog.push({
                     id: movie.id,
@@ -243,7 +192,6 @@ builder.defineCatalogHandler(async function(args) {
                 });
             }
         } else if (type === 'series') {
-            // Sample TV series entries
             const sampleSeries = [
                 { id: 'tt4052886', name: 'Lucifer', year: '2016' },
                 { id: 'tt0903747', name: 'Breaking Bad', year: '2008' },
@@ -256,7 +204,7 @@ builder.defineCatalogHandler(async function(args) {
                 { id: 'tt0460649', name: 'How I Met Your Mother', year: '2005' },
                 { id: 'tt2467372', name: 'Brooklyn Nine-Nine', year: '2013' }
             ];
-            
+
             for (const series of sampleSeries) {
                 mockCatalog.push({
                     id: series.id,
@@ -267,49 +215,32 @@ builder.defineCatalogHandler(async function(args) {
                 });
             }
         }
-        
-        // Handle search
+
         if (extra.search) {
             const searchTerm = extra.search.toLowerCase();
-            const filtered = mockCatalog.filter(item => 
-                item.name.toLowerCase().includes(searchTerm)
-            );
+            const filtered = mockCatalog.filter(item => item.name.toLowerCase().includes(searchTerm));
             return Promise.resolve({ metas: filtered });
         }
-        
-        // Handle pagination
+
         const skip = parseInt(extra.skip) || 0;
         const limit = 20;
-        const paginatedResults = mockCatalog.slice(skip, skip + limit);
-        
-        return Promise.resolve({ metas: paginatedResults });
-        
+        return Promise.resolve({ metas: mockCatalog.slice(skip, skip + limit) });
     } catch (error) {
         console.error('Catalog handler error:', error);
         return Promise.resolve({ metas: [] });
     }
 });
 
-// Meta handler - provides detailed metadata for individual items
 builder.defineMetaHandler(async function(args) {
     console.log('Meta request:', args);
-    
     try {
         const { type, id } = args;
-        
-        // Extract base ID for series
         let baseId = id;
-        if (type === 'series' && id.includes(':')) {
-            baseId = id.split(':')[0];
-        }
-        
+        if (type === 'series' && id.includes(':')) baseId = id.split(':')[0];
+
         const metadata = await getContentMetadata(baseId, type);
-        
-        if (!metadata) {
-            return Promise.resolve({ meta: null });
-        }
-        
-        // Build meta object
+        if (!metadata) return Promise.resolve({ meta: null });
+
         const meta = {
             id: baseId,
             type: type,
@@ -322,12 +253,9 @@ builder.defineMetaHandler(async function(args) {
             genre: metadata.genre,
             runtime: type === 'movie' ? '120 min' : undefined
         };
-        
-        // For series, add videos (episodes)
+
         if (type === 'series') {
             meta.videos = [];
-            
-            // Mock episode data - in real implementation, fetch from API
             for (let season = 1; season <= 3; season++) {
                 for (let episode = 1; episode <= 10; episode++) {
                     meta.videos.push({
@@ -341,9 +269,8 @@ builder.defineMetaHandler(async function(args) {
                 }
             }
         }
-        
+
         return Promise.resolve({ meta: meta });
-        
     } catch (error) {
         console.error('Meta handler error:', error);
         return Promise.resolve({ meta: null });
