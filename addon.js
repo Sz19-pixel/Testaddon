@@ -5,8 +5,8 @@ const needle = require("needle");
 const manifest = {
     "id": "org.stremio.vidfast",
     "version": "1.0.0",
-    "name": "VidFast Addon",
-    "description": "Stremio addon that provides streaming content via VidFast.pro",
+    "name": "VidFast Multi-Provider Addon",
+    "description": "Stremio addon with multiple streaming providers",
     "icon": "https://vidfast.pro/favicon.ico",
     
     // Resources this addon provides
@@ -24,7 +24,7 @@ const manifest = {
         {
             type: 'movie',
             id: 'vidfast_movies',
-            name: 'VidFast Movies',
+            name: 'Multi-Provider Movies',
             extra: [
                 {
                     name: 'search',
@@ -39,7 +39,7 @@ const manifest = {
         {
             type: 'series',
             id: 'vidfast_series', 
-            name: 'VidFast TV Shows',
+            name: 'Multi-Provider TV Shows',
             extra: [
                 {
                     name: 'search',
@@ -58,6 +58,52 @@ const manifest = {
 };
 
 const builder = new addonBuilder(manifest);
+
+// Multiple streaming providers configuration
+const PROVIDERS = {
+    vidfast: {
+        name: "VidFast",
+        baseUrl: "https://vidfast.pro",
+        getMovieUrl: (id) => `https://vidfast.pro/movie/${id}?autoPlay=true`,
+        getSeriesUrl: (id, season, episode) => `https://vidfast.pro/tv/${id}/${season}/${episode}?autoPlay=true&nextButton=true&autoNext=true`,
+        priority: 1
+    },
+    vidsrcme: {
+        name: "VidSrc.me",
+        baseUrl: "https://vidsrc.me",
+        getMovieUrl: (id) => `https://vidsrc.me/embed/movie?imdb=${id}`,
+        getSeriesUrl: (id, season, episode) => `https://vidsrc.me/embed/tv?imdb=${id}&season=${season}&episode=${episode}`,
+        priority: 2
+    },
+    vidsrcpro: {
+        name: "VidSrc.pro",
+        baseUrl: "https://vidsrc.pro",
+        getMovieUrl: (id) => `https://vidsrc.pro/embed/movie/${id}`,
+        getSeriesUrl: (id, season, episode) => `https://vidsrc.pro/embed/tv/${id}/${season}/${episode}`,
+        priority: 3
+    },
+    vidsrcxyz: {
+        name: "VidSrc.xyz",
+        baseUrl: "https://vidsrc.xyz",
+        getMovieUrl: (id) => `https://vidsrc.xyz/embed/movie?imdb=${id}`,
+        getSeriesUrl: (id, season, episode) => `https://vidsrc.xyz/embed/tv?imdb=${id}&season=${season}&episode=${episode}`,
+        priority: 4
+    },
+    moviesapi: {
+        name: "MoviesAPI",
+        baseUrl: "https://moviesapi.club",
+        getMovieUrl: (id) => `https://moviesapi.club/movie/${id}`,
+        getSeriesUrl: (id, season, episode) => `https://moviesapi.club/tv/${id}-${season}-${episode}`,
+        priority: 5
+    },
+    superembed: {
+        name: "SuperEmbed",
+        baseUrl: "https://multiembed.mov",
+        getMovieUrl: (id) => `https://multiembed.mov/?video_id=${id}&tmdb=1`,
+        getSeriesUrl: (id, season, episode) => `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`,
+        priority: 6
+    }
+};
 
 // Helper function to extract IMDB/TMDB ID
 function extractId(id) {
@@ -93,20 +139,46 @@ async function getContentMetadata(id, type) {
     }
 }
 
-// Helper function to construct VidFast embed URL
-function getVidFastUrl(id, type, season = null, episode = null) {
+// Helper function to generate streams from all providers
+function generateStreams(id, type, season = null, episode = null) {
+    const streams = [];
     const cleanId = extractId(id);
     
-    if (type === 'movie') {
-        return `https://vidfast.pro/movie/${cleanId}?autoPlay=true`;
-    } else if (type === 'series' && season && episode) {
-        return `https://vidfast.pro/tv/${cleanId}/${season}/${episode}?autoPlay=true&nextButton=true&autoNext=true`;
-    }
+    // Generate streams for each provider
+    Object.entries(PROVIDERS).forEach(([key, provider]) => {
+        let streamUrl = null;
+        
+        if (type === 'movie') {
+            streamUrl = provider.getMovieUrl(cleanId);
+        } else if (type === 'series' && season && episode) {
+            streamUrl = provider.getSeriesUrl(cleanId, season, episode);
+        }
+        
+        if (streamUrl) {
+            streams.push({
+                name: provider.name,
+                description: `Stream via ${provider.name}`,
+                url: streamUrl,
+                title: `${provider.name} - ${type === 'series' ? `S${season}E${episode}` : 'Movie'}`,
+                behaviorHints: {
+                    bingeGroup: type === 'series' ? `${key}-${cleanId}` : undefined,
+                    notWebReady: false
+                }
+            });
+        }
+    });
     
-    return null;
+    // Sort streams by priority (lower number = higher priority)
+    streams.sort((a, b) => {
+        const providerA = Object.values(PROVIDERS).find(p => p.name === a.name);
+        const providerB = Object.values(PROVIDERS).find(p => p.name === b.name);
+        return (providerA?.priority || 999) - (providerB?.priority || 999);
+    });
+    
+    return streams;
 }
 
-// Stream handler - provides streaming links
+// Stream handler - provides streaming links from multiple providers
 builder.defineStreamHandler(async function(args) {
     console.log('Stream request:', args);
     
@@ -125,25 +197,9 @@ builder.defineStreamHandler(async function(args) {
             episode = parts[2];
         }
         
-        const vidFastUrl = getVidFastUrl(baseId, type, season, episode);
+        const streams = generateStreams(baseId, type, season, episode);
         
-        if (!vidFastUrl) {
-            return Promise.resolve({ streams: [] });
-        }
-        
-        // Create stream object
-        const stream = {
-            name: "VidFast",
-            description: "Stream via VidFast.pro",
-            url: vidFastUrl,
-            title: `VidFast - ${type === 'series' ? `S${season}E${episode}` : 'Movie'}`,
-            behaviorHints: {
-                bingeGroup: type === 'series' ? `vidfast-${baseId}` : undefined,
-                notWebReady: false
-            }
-        };
-        
-        return Promise.resolve({ streams: [stream] });
+        return Promise.resolve({ streams: streams });
         
     } catch (error) {
         console.error('Stream handler error:', error);
@@ -168,8 +224,13 @@ builder.defineCatalogHandler(async function(args) {
                 { id: 'tt6263850', name: 'Batman Forever', year: '1995' },
                 { id: 'tt0468569', name: 'The Dark Knight', year: '2008' },
                 { id: 'tt1375666', name: 'Inception', year: '2010' },
-                { id: '533535', name: 'Deadpool', year: '2016' },
-                { id: 'tt0137523', name: 'Fight Club', year: '1999' }
+                { id: 'tt4154756', name: 'Avengers: Endgame', year: '2019' },
+                { id: 'tt0137523', name: 'Fight Club', year: '1999' },
+                { id: 'tt0111161', name: 'The Shawshank Redemption', year: '1994' },
+                { id: 'tt0110912', name: 'Pulp Fiction', year: '1994' },
+                { id: 'tt0108052', name: 'Schindlers List', year: '1993' },
+                { id: 'tt0816692', name: 'Interstellar', year: '2014' },
+                { id: 'tt1345836', name: 'The Dark Knight Rises', year: '2012' }
             ];
             
             for (const movie of sampleMovies) {
@@ -186,9 +247,14 @@ builder.defineCatalogHandler(async function(args) {
             const sampleSeries = [
                 { id: 'tt4052886', name: 'Lucifer', year: '2016' },
                 { id: 'tt0903747', name: 'Breaking Bad', year: '2008' },
-                { id: '63174', name: 'Game of Thrones', year: '2011' },
                 { id: 'tt0944947', name: 'Game of Thrones', year: '2011' },
-                { id: 'tt2306299', name: 'Vikings', year: '2013' }
+                { id: 'tt2306299', name: 'Vikings', year: '2013' },
+                { id: 'tt5491994', name: 'Planet Earth II', year: '2016' },
+                { id: 'tt0386676', name: 'The Office', year: '2005' },
+                { id: 'tt0108778', name: 'Friends', year: '1994' },
+                { id: 'tt1439629', name: 'Community', year: '2009' },
+                { id: 'tt0460649', name: 'How I Met Your Mother', year: '2005' },
+                { id: 'tt2467372', name: 'Brooklyn Nine-Nine', year: '2013' }
             ];
             
             for (const series of sampleSeries) {
