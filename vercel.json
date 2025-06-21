@@ -1,36 +1,14 @@
 {
   "version": 2,
   "functions": {
-    "api/serverless.js": {
+    "api/index.js": {
       "runtime": "@vercel/node"
     }
   },
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/api/serverless.js"
-    }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  },
-  "headers": [
+  "rewrites": [
     {
       "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        },
-        {
-          "key": "Access-Control-Allow-Methods",
-          "value": "GET, POST, OPTIONS"
-        },
-        {
-          "key": "Access-Control-Allow-Headers",
-          "value": "Content-Type"
-        }
-      ]
+      "destination": "/api/index.js"
     }
   ]
 }
