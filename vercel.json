@@ -1,9 +1,24 @@
 {
-  "version": 2,
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/manifest.json",
       "destination": "/api/index.js"
+    },
+    {
+      "source": "/catalog/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/stream/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/meta/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/",
+      "destination": "/public/index.html"
     }
   ],
   "headers": [
