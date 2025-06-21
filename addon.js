@@ -4,7 +4,7 @@ const needle = require("needle");
 const manifest = {
     id: "org.stremio.vidfast",
     version: "1.0.0",
-    name: "VidFast Multi-Provider Addon",
+    name: "Multi-Provider Addon",
     description: "Stremio addon with multiple streaming providers",
     icon: "https://vidfast.pro/favicon.ico",
     resources: ["catalog", "stream", "meta"],
@@ -30,42 +30,42 @@ const builder = new addonBuilder(manifest);
 
 const PROVIDERS = {
     vidfast: {
-        name: "VidFast",
+        name: "Server1",
         baseUrl: "https://vidfast.pro",
         getMovieUrl: (id) => `https://vidfast.pro/movie/${id}?autoPlay=true`,
         getSeriesUrl: (id, season, episode) => `https://vidfast.pro/tv/${id}/${season}/${episode}?autoPlay=true&nextButton=true&autoNext=true`,
         priority: 1
     },
     vidsrcme: {
-        name: "VidSrc.me",
+        name: "Server2",
         baseUrl: "https://vidsrc.me",
         getMovieUrl: (id) => `https://vidsrc.me/embed/movie?imdb=${id}`,
         getSeriesUrl: (id, season, episode) => `https://vidsrc.me/embed/tv?imdb=${id}&season=${season}&episode=${episode}`,
         priority: 2
     },
     vidsrcpro: {
-        name: "VidSrc.pro",
+        name: "Server3",
         baseUrl: "https://vidsrc.pro",
         getMovieUrl: (id) => `https://vidsrc.pro/embed/movie/${id}`,
         getSeriesUrl: (id, season, episode) => `https://vidsrc.pro/embed/tv/${id}/${season}/${episode}`,
         priority: 3
     },
     vidsrcxyz: {
-        name: "VidSrc.xyz",
+        name: "Server4",
         baseUrl: "https://vidsrc.xyz",
         getMovieUrl: (id) => `https://vidsrc.xyz/embed/movie?imdb=${id}`,
         getSeriesUrl: (id, season, episode) => `https://vidsrc.xyz/embed/tv?imdb=${id}&season=${season}&episode=${episode}`,
         priority: 4
     },
     moviesapi: {
-        name: "MoviesAPI",
+        name: "Server5",
         baseUrl: "https://moviesapi.club",
         getMovieUrl: (id) => `https://moviesapi.club/movie/${id}`,
         getSeriesUrl: (id, season, episode) => `https://moviesapi.club/tv/${id}-${season}-${episode}`,
         priority: 5
     },
     superembed: {
-        name: "SuperEmbed",
+        name: "Server6",
         baseUrl: "https://multiembed.mov",
         getMovieUrl: (id) => `https://multiembed.mov/?video_id=${id}&tmdb=1`,
         getSeriesUrl: (id, season, episode) => `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`,
