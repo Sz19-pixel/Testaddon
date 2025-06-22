@@ -1,7 +1,7 @@
 {
   "name": "stremio-vidfast-addon",
   "version": "1.0.0",
-  "description": "Stremio addon that integrates with VidFast.pro to provide movie and TV show streaming",
+  "description": "Stremio addon that integrates with multiple providers to extract direct video links",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -14,13 +14,15 @@
     "vidfast",
     "streaming",
     "movies",
-    "tv-shows"
+    "tv-shows",
+    "video-extraction"
   ],
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
     "stremio-addon-sdk": "^1.6.8",
-    "needle": "^3.2.0"
+    "needle": "^3.2.0",
+    "puppeteer": "^21.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
