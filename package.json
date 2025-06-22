@@ -1,6 +1,6 @@
 {
   "name": "stremio-vidfast-addon",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Stremio addon that integrates with multiple providers to extract direct video links",
   "main": "server.js",
   "scripts": {
@@ -21,10 +21,7 @@
   "license": "MIT",
   "dependencies": {
     "stremio-addon-sdk": "^1.6.8",
-    "needle": "^3.2.0",
-    "puppeteer-core": "^21.0.0",
-    "@sparticuz/chromium": "^119.0.0",
-    "playwright-core": "^1.40.0"
+    "needle": "^3.2.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
