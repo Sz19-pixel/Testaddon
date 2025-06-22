@@ -19,7 +19,7 @@ const manifest = {
         {
             type: 'series',
             id: 'vidfast_series',
-            name: 'Multi-Provider TV Shows',
+            name: 'Multi-Providers TV Shows',
             extra: [{ name: 'search', isRequired: false }, { name: 'skip', isRequired: false }]
         }
     ],
