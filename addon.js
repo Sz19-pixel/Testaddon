@@ -1,5 +1,6 @@
 const { addonBuilder } = require("stremio-addon-sdk");
 const needle = require("needle");
+const puppeteer = require("puppeteer");
 
 const manifest = {
     id: "org.stremio.vidfast",
@@ -30,48 +31,40 @@ const builder = new addonBuilder(manifest);
 
 const PROVIDERS = {
     vidfast: {
-        name: "Server1",
+        name: "VidFast Server",
         baseUrl: "https://vidfast.pro",
         getMovieUrl: (id) => `https://vidfast.pro/movie/${id}?autoPlay=true`,
         getSeriesUrl: (id, season, episode) => `https://vidfast.pro/tv/${id}/${season}/${episode}?autoPlay=true&nextButton=true&autoNext=true`,
-        priority: 1
+        priority: 1,
+        extractable: true
     },
     vidsrcme: {
-        name: "Server2",
+        name: "VidSrc.me",
         baseUrl: "https://vidsrc.me",
         getMovieUrl: (id) => `https://vidsrc.me/embed/movie?imdb=${id}`,
         getSeriesUrl: (id, season, episode) => `https://vidsrc.me/embed/tv?imdb=${id}&season=${season}&episode=${episode}`,
-        priority: 2
+        priority: 2,
+        extractable: true
     },
     vidsrcpro: {
-        name: "Server3",
+        name: "VidSrc.pro",
         baseUrl: "https://vidsrc.pro",
         getMovieUrl: (id) => `https://vidsrc.pro/embed/movie/${id}`,
         getSeriesUrl: (id, season, episode) => `https://vidsrc.pro/embed/tv/${id}/${season}/${episode}`,
-        priority: 3
+        priority: 3,
+        extractable: true
     },
-    vidsrcxyz: {
-        name: "Server4",
-        baseUrl: "https://vidsrc.xyz",
-        getMovieUrl: (id) => `https://vidsrc.xyz/embed/movie?imdb=${id}`,
-        getSeriesUrl: (id, season, episode) => `https://vidsrc.xyz/embed/tv?imdb=${id}&season=${season}&episode=${episode}`,
-        priority: 4
-    },
-    moviesapi: {
-        name: "Server5",
-        baseUrl: "https://moviesapi.club",
-        getMovieUrl: (id) => `https://moviesapi.club/movie/${id}`,
-        getSeriesUrl: (id, season, episode) => `https://moviesapi.club/tv/${id}-${season}-${episode}`,
-        priority: 5
-    },
-    superembed: {
-        name: "Server6",
-        baseUrl: "https://multiembed.mov",
-        getMovieUrl: (id) => `https://multiembed.mov/?video_id=${id}&tmdb=1`,
-        getSeriesUrl: (id, season, episode) => `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`,
-        priority: 6
+    // إضافة مصادر مباشرة كـ fallback
+    direct: {
+        name: "Direct Links",
+        priority: 0,
+        extractable: false
     }
 };
+
+// Cache للروابط المستخرجة لتحسين الأداء
+const videoCache = new Map();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 دقيقة
 
 function extractId(id) {
     if (id.startsWith('tt')) return id;
@@ -79,6 +72,257 @@ function extractId(id) {
     return id;
 }
 
+// دالة استخراج الفيديو من embed URL
+async function extractVideoFromEmbed(embedUrl, providerKey) {
+    const cacheKey = `${providerKey}_${embedUrl}`;
+    
+    // فحص الـ cache أولاً
+    if (videoCache.has(cacheKey)) {
+        const cached = videoCache.get(cacheKey);
+        if (Date.now() - cached.timestamp < CACHE_DURATION) {
+            console.log('Cache hit for:', embedUrl);
+            return cached.url;
+        } else {
+            videoCache.delete(cacheKey);
+        }
+    }
+
+    let browser;
+    try {
+        console.log(`🔍 Extracting video from: ${embedUrl}`);
+        
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding'
+            ]
+        });
+
+        const page = await browser.newPage();
+        
+        // تعيين User Agent
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await page.setViewport({ width: 1920, height: 1080 });
+
+        // تعيين timeout أطول
+        page.setDefaultTimeout(15000);
+
+        await page.goto(embedUrl, { 
+            waitUntil: 'networkidle0',
+            timeout: 20000 
+        });
+
+        // انتظار تحميل المحتوى
+        await page.waitForTimeout(5000);
+
+        // استخراج رابط الفيديو
+        const videoUrl = await page.evaluate(() => {
+            // البحث في عناصر video
+            const videos = document.querySelectorAll('video');
+            for (let video of videos) {
+                if (video.src && (video.src.includes('.m3u8') || video.src.includes('.mp4'))) {
+                    return video.src;
+                }
+                
+                const sources = video.querySelectorAll('source');
+                for (let source of sources) {
+                    if (source.src && (source.src.includes('.m3u8') || source.src.includes('.mp4'))) {
+                        return source.src;
+                    }
+                }
+            }
+
+            // البحث في JavaScript
+            const scripts = Array.from(document.scripts);
+            for (let script of scripts) {
+                const content = script.textContent || script.innerText || '';
+                
+                // أنماط مختلفة للبحث
+                const patterns = [
+                    /(https?:\/\/[^\s"'`]+\.m3u8[^\s"'`]*)/gi,
+                    /(https?:\/\/[^\s"'`]+\.mp4[^\s"'`]*)/gi,
+                    /["']([^"']*\.m3u8[^"']*)["']/gi,
+                    /["']([^"']*\.mp4[^"']*)["']/gi,
+                    /file\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/gi,
+                    /src\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/gi
+                ];
+
+                for (let pattern of patterns) {
+                    const matches = [...content.matchAll(pattern)];
+                    for (let match of matches) {
+                        let url = match[1] || match[0];
+                        url = url.replace(/['"]/g, '');
+                        
+                        if (url.startsWith('http') && (url.includes('.m3u8') || url.includes('.mp4'))) {
+                            return url;
+                        }
+                    }
+                }
+            }
+
+            // البحث في متغيرات window
+            for (let key in window) {
+                try {
+                    const value = window[key];
+                    if (typeof value === 'string' && 
+                        (value.includes('.m3u8') || value.includes('.mp4')) && 
+                        value.startsWith('http')) {
+                        return value;
+                    }
+                } catch (e) {
+                    // تجاهل الأخطاء
+                }
+            }
+
+            return null;
+        });
+
+        if (videoUrl) {
+            // حفظ في الـ cache
+            videoCache.set(cacheKey, {
+                url: videoUrl,
+                timestamp: Date.now()
+            });
+            
+            console.log(`✅ Video extracted: ${videoUrl}`);
+            return videoUrl;
+        }
+
+        console.log(`❌ No video found in: ${embedUrl}`);
+        return null;
+
+    } catch (error) {
+        console.error(`❌ Error extracting video from ${embedUrl}:`, error.message);
+        return null;
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+}
+
+// دالة الحصول على روابط مباشرة (fallback)
+function getDirectLinks(id, type, season = null, episode = null) {
+    const directStreams = [];
+    
+    // روابط مباشرة كمثال (يمكنك إضافة المزيد)
+    if (type === 'movie') {
+        // يمكنك إضافة APIs أخرى هنا لجلب روابط مباشرة
+        directStreams.push({
+            name: "Sample Direct Link",
+            title: "HD Stream",
+            url: "https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4",
+            description: "Sample direct MP4 link",
+            behaviorHints: { notWebReady: false }
+        });
+    }
+    
+    return directStreams;
+}
+
+async function generateStreams(id, type, season = null, episode = null) {
+    const streams = [];
+    const cleanId = extractId(id);
+
+    console.log(`Generating streams for ${type}: ${cleanId}${season && episode ? ` S${season}E${episode}` : ''}`);
+
+    // إضافة روابط مباشرة أولاً
+    const directLinks = getDirectLinks(cleanId, type, season, episode);
+    streams.push(...directLinks);
+
+    // معالجة كل provider
+    const extractionPromises = Object.entries(PROVIDERS).map(async ([key, provider]) => {
+        if (!provider.extractable) return null;
+
+        try {
+            let embedUrl = null;
+            if (type === 'movie') {
+                embedUrl = provider.getMovieUrl(cleanId);
+            } else if (type === 'series' && season && episode) {
+                embedUrl = provider.getSeriesUrl(cleanId, season, episode);
+            }
+
+            if (!embedUrl) return null;
+
+            // استخراج الرابط المباشر
+            const directUrl = await extractVideoFromEmbed(embedUrl, key);
+            
+            if (directUrl) {
+                return {
+                    name: provider.name,
+                    description: `Direct stream via ${provider.name}`,
+                    url: directUrl,
+                    title: `${provider.name} - ${type === 'series' ? `S${season}E${episode}` : 'Movie'}`,
+                    behaviorHints: {
+                        bingeGroup: type === 'series' ? `${key}-${cleanId}` : undefined,
+                        notWebReady: false
+                    }
+                };
+            } else {
+                // إذا فشل الاستخراج، أضف الـ embed URL كـ fallback
+                return {
+                    name: `${provider.name} (Embed)`,
+                    description: `Embed player via ${provider.name}`,
+                    url: embedUrl,
+                    title: `${provider.name} Embed - ${type === 'series' ? `S${season}E${episode}` : 'Movie'}`,
+                    behaviorHints: {
+                        bingeGroup: type === 'series' ? `${key}-${cleanId}` : undefined,
+                        notWebReady: true // Embed URLs are not web-ready
+                    }
+                };
+            }
+        } catch (error) {
+            console.error(`Error processing ${provider.name}:`, error.message);
+            return null;
+        }
+    });
+
+    // انتظار جميع عمليات الاستخراج
+    const extractedStreams = await Promise.all(extractionPromises);
+    
+    // إضافة الروابط المستخرجة
+    extractedStreams.forEach(stream => {
+        if (stream) streams.push(stream);
+    });
+
+    // ترتيب الروابط حسب الأولوية
+    streams.sort((a, b) => {
+        const providerA = Object.values(PROVIDERS).find(p => a.name.includes(p.name));
+        const providerB = Object.values(PROVIDERS).find(p => b.name.includes(p.name));
+        return (providerA?.priority || 999) - (providerB?.priority || 999);
+    });
+
+    console.log(`Generated ${streams.length} streams`);
+    return streams;
+}
+
+builder.defineStreamHandler(async function(args) {
+    console.log('Stream request:', args);
+    try {
+        const { type, id } = args;
+        let season = null, episode = null, baseId = id;
+
+        if (type === 'series' && id.includes(':')) {
+            const parts = id.split(':');
+            baseId = parts[0];
+            season = parts[1];
+            episode = parts[2];
+        }
+
+        const streams = await generateStreams(baseId, type, season, episode);
+        return Promise.resolve({ streams: streams });
+    } catch (error) {
+        console.error('Stream handler error:', error);
+        return Promise.resolve({ streams: [] });
+    }
+});
+
+// باقي الكود يبقى كما هو...
 async function getContentMetadata(id, type) {
     try {
         return {
@@ -98,70 +342,6 @@ async function getContentMetadata(id, type) {
     }
 }
 
-function generateStreams(id, type, season = null, episode = null) {
-    const streams = [];
-    const cleanId = extractId(id);
-
-    // ✅ M3U8 ثابت
-    if (type === 'movie') {
-        streams.push({
-            name: "M3U8 Direct",
-            title: "HD Stream",
-            url: "https://tmstr3.shadowlandschronicles.com/pl/H4sIAAAAAAAAAw3QS3aDIBQA0C2JaBM7qxGsnoKB4sMwE7E1_ppjUxOz.mZyF3CR2.Plb4Ondb3_Qg4hf7fz7d7ZMAxs9Mp7sygoH3XK10Z32pGuOuFOC5Sfy5kuoherVpDzCd2NgkubynOD8_Q0XeNyEiEcoqSB7hcqF6u.E4VyZduPSI88YYP8KyqY2.RtUbNcYRpCramQZeY19MLY1G1WSZAe7WCAtSbk5t7zkKPToynNh85XHwvfKygz8D54t73bbHqVDpc3ldJYbtebQQIXkKFPHR7dmC0Ms1UTyTkIXjPQgHkGKwRH7pMQJoftwFZO3YvQeS1UzFxv_LoyPp8h02Q82EQuBZXZ82JzDy.6BxFMXwtBAQAA/ceb64c203f772a72ce6f369846db72cf/index.m3u8",
-            description: "Static M3U8 direct link",
-            behaviorHints: { notWebReady: false }
-        });
-    }
-
-    Object.entries(PROVIDERS).forEach(([key, provider]) => {
-        let streamUrl = null;
-        if (type === 'movie') streamUrl = provider.getMovieUrl(cleanId);
-        else if (type === 'series' && season && episode) streamUrl = provider.getSeriesUrl(cleanId, season, episode);
-
-        if (streamUrl) {
-            streams.push({
-                name: provider.name,
-                description: `Stream via ${provider.name}`,
-                url: streamUrl,
-                title: `${provider.name} - ${type === 'series' ? `S${season}E${episode}` : 'Movie'}`,
-                behaviorHints: {
-                    bingeGroup: type === 'series' ? `${key}-${cleanId}` : undefined,
-                    notWebReady: false
-                }
-            });
-        }
-    });
-
-    streams.sort((a, b) => {
-        const providerA = Object.values(PROVIDERS).find(p => p.name === a.name);
-        const providerB = Object.values(PROVIDERS).find(p => p.name === b.name);
-        return (providerA?.priority || 999) - (providerB?.priority || 999);
-    });
-
-    return streams;
-}
-
-builder.defineStreamHandler(async function(args) {
-    console.log('Stream request:', args);
-    try {
-        const { type, id } = args;
-        let season = null, episode = null, baseId = id;
-
-        if (type === 'series' && id.includes(':')) {
-            const parts = id.split(':');
-            baseId = parts[0];
-            season = parts[1];
-            episode = parts[2];
-        }
-
-        const streams = generateStreams(baseId, type, season, episode);
-        return Promise.resolve({ streams: streams });
-    } catch (error) {
-        console.error('Stream handler error:', error);
-        return Promise.resolve({ streams: [] });
-    }
-});
-
 builder.defineCatalogHandler(async function(args) {
     console.log('Catalog request:', args);
     try {
@@ -174,12 +354,7 @@ builder.defineCatalogHandler(async function(args) {
                 { id: 'tt0468569', name: 'The Dark Knight', year: '2008' },
                 { id: 'tt1375666', name: 'Inception', year: '2010' },
                 { id: 'tt4154756', name: 'Avengers: Endgame', year: '2019' },
-                { id: 'tt0137523', name: 'Fight Club', year: '1999' },
-                { id: 'tt0111161', name: 'The Shawshank Redemption', year: '1994' },
-                { id: 'tt0110912', name: 'Pulp Fiction', year: '1994' },
-                { id: 'tt0108052', name: 'Schindlers List', year: '1993' },
-                { id: 'tt0816692', name: 'Interstellar', year: '2014' },
-                { id: 'tt1345836', name: 'The Dark Knight Rises', year: '2012' }
+                { id: 'tt0137523', name: 'Fight Club', year: '1999' }
             ];
 
             for (const movie of sampleMovies) {
@@ -195,14 +370,7 @@ builder.defineCatalogHandler(async function(args) {
             const sampleSeries = [
                 { id: 'tt4052886', name: 'Lucifer', year: '2016' },
                 { id: 'tt0903747', name: 'Breaking Bad', year: '2008' },
-                { id: 'tt0944947', name: 'Game of Thrones', year: '2011' },
-                { id: 'tt2306299', name: 'Vikings', year: '2013' },
-                { id: 'tt5491994', name: 'Planet Earth II', year: '2016' },
-                { id: 'tt0386676', name: 'The Office', year: '2005' },
-                { id: 'tt0108778', name: 'Friends', year: '1994' },
-                { id: 'tt1439629', name: 'Community', year: '2009' },
-                { id: 'tt0460649', name: 'How I Met Your Mother', year: '2005' },
-                { id: 'tt2467372', name: 'Brooklyn Nine-Nine', year: '2013' }
+                { id: 'tt0944947', name: 'Game of Thrones', year: '2011' }
             ];
 
             for (const series of sampleSeries) {
